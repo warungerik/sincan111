@@ -1,0 +1,13 @@
+User-agent: *
+
+Disallow: /includes/
+Disallow: /config_midtrans.php
+Disallow: /get_products.php
+Disallow: /get_latest_purchase.php
+Disallow: /cek_voucher.php
+Disallow: /cek_pesanan.php
+Disallow: /pesanan.php
+Disallow: /bayar.php
+Allow: /bayar.php?id=
+
+Sitemap: https://warungerik.com/sitemap.php
