@@ -1,6 +1,6 @@
 <?php
 include 'includes/koneksi.php';
-include 'config_midtrans.php';
+// DIUBAH: hapus config_midtrans, tidak perlu include apapun untuk LapakinAja di sini
 
 $order_id = isset($_GET['order_id']) ? $_GET['order_id'] : '';
 
@@ -46,7 +46,7 @@ if ($status_class == 'settlement' || $status_class == 'success') {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <script src="https://app.midtrans.com/snap/snap.js" data-client-key="<?php echo \Midtrans\Config::$clientKey; ?>"></script>
+    <!-- DIUBAH: hapus script snap.js Midtrans, tidak dibutuhkan lagi -->
 
     <style>
         /* ═══════════════════════════════════════════
@@ -178,10 +178,7 @@ if ($status_class == 'settlement' || $status_class == 'success') {
             animation: fadeUp 0.45s cubic-bezier(0.16,1,0.3,1) both;
         }
 
-        /* Status-colored top strip */
-        .main-card .status-strip {
-            height: 4px;
-        }
+        .main-card .status-strip { height: 4px; }
 
         .main-card.success .status-strip { background: linear-gradient(90deg, var(--success), #4aad78); }
         .main-card.pending .status-strip { background: linear-gradient(90deg, var(--warn), #d97706); }
@@ -196,7 +193,6 @@ if ($status_class == 'settlement' || $status_class == 'success') {
             border-bottom: 1px solid var(--border2);
         }
 
-        /* Status icon */
         .status-icon-wrap {
             position: relative;
             width: 72px; height: 72px;
@@ -224,7 +220,6 @@ if ($status_class == 'settlement' || $status_class == 'success') {
             animation: iconIn 0.5s cubic-bezier(0.34,1.56,0.64,1) 0.2s both;
         }
 
-        /* Per-status variables */
         .main-card.success { --s-color: var(--success); --s-bg: var(--success-bg); --s-border: var(--success-border); }
         .main-card.pending { --s-color: var(--warn);    --s-bg: var(--warn-bg);    --s-border: var(--warn-border);    }
         .main-card.failed  { --s-color: var(--danger);  --s-bg: var(--danger-bg);  --s-border: var(--danger-border);  }
@@ -245,7 +240,6 @@ if ($status_class == 'settlement' || $status_class == 'success') {
 
         .status-sub strong { color: var(--text); font-weight: 700; }
 
-        /* Info alert (success only) */
         .info-alert {
             display: flex;
             align-items: flex-start;
@@ -355,7 +349,6 @@ if ($status_class == 'settlement' || $status_class == 'success') {
         .main-card.pending .status-pill { background: var(--warn-bg);    color: var(--warn);    border: 1px solid var(--warn-border);    }
         .main-card.failed  .status-pill { background: var(--danger-bg);  color: var(--danger);  border: 1px solid var(--danger-border);  }
 
-        /* Copy order ID button */
         .copy-order-btn {
             display: inline-flex;
             align-items: center;
@@ -372,11 +365,7 @@ if ($status_class == 'settlement' || $status_class == 'success') {
             transition: all 0.15s;
         }
 
-        .copy-order-btn:hover {
-            background: var(--accent-bg);
-            color: var(--accent);
-        }
-
+        .copy-order-btn:hover { background: var(--accent-bg); color: var(--accent); }
         .copy-order-btn i { font-size: 11px; color: var(--muted2); }
 
         /* ═══════════════════════════════════════════
@@ -389,7 +378,8 @@ if ($status_class == 'settlement' || $status_class == 'success') {
             gap: 10px;
         }
 
-        .btn-pay {
+        /* DIUBAH: btn-pay → btn-qris untuk tampilan pending QRIS */
+        .btn-qris {
             display: flex;
             align-items: center;
             justify-content: center;
@@ -405,9 +395,11 @@ if ($status_class == 'settlement' || $status_class == 'success') {
             cursor: pointer;
             transition: all 0.15s;
             box-shadow: 0 2px 8px rgba(193,127,62,0.3);
+            text-decoration: none;
+            text-align: center;
         }
 
-        .btn-pay:hover {
+        .btn-qris:hover {
             background: var(--accent-hover);
             box-shadow: 0 4px 14px rgba(193,127,62,0.4);
             transform: translateY(-1px);
@@ -463,7 +455,6 @@ if ($status_class == 'settlement' || $status_class == 'success') {
             to   { transform: scale(1);   opacity: 1; }
         }
 
-        /* SweetAlert2 light override */
         .swal2-popup {
             font-family: var(--font) !important;
             border-radius: var(--radius) !important;
@@ -541,7 +532,7 @@ if ($status_class == 'settlement' || $status_class == 'success') {
 
                 <?php elseif ($status_class === 'pending'): ?>
                     <div class="status-title">Menunggu Pembayaran</div>
-                    <div class="status-sub">Selesaikan pembayaran agar pesanan<br>segera kami proses.</div>
+                    <div class="status-sub">QR Code sudah dikirim ke halaman pembayaran.<br>Selesaikan pembayaran agar pesanan segera diproses.</div>
 
                 <?php else: ?>
                     <div class="status-title">Pembayaran Gagal</div>
@@ -601,9 +592,10 @@ if ($status_class == 'settlement' || $status_class == 'success') {
             <!-- ACTIONS -->
             <div class="actions-section">
                 <?php if ($status_class === 'pending' && !empty($pesanan['snap_token'])): ?>
-                    <button id="pay-button" class="btn-pay">
-                        <i class="fas fa-credit-card"></i> Bayar Sekarang
-                    </button>
+                    <!-- DIUBAH: snap_token sekarang isinya qris_url, tampilkan QR di halaman bayar -->
+                    <a href="bayar.php?order_id=<?php echo urlencode($pesanan['order_id']); ?>" class="btn-qris">
+                        <i class="fas fa-qrcode"></i> Lihat QR Code Pembayaran
+                    </a>
                 <?php endif; ?>
 
                 <a href="index.php" class="btn-home">
@@ -638,32 +630,11 @@ if ($status_class == 'settlement' || $status_class == 'success') {
         }).catch(() => {});
     }
 
-    <?php if ($status_class === 'pending' && !empty($pesanan['snap_token'])): ?>
-    document.getElementById('pay-button').onclick = function () {
-        snap.pay('<?php echo $pesanan['snap_token']; ?>', {
-            onSuccess: function () {
-                window.location.href = 'pesanan.php?order_id=<?php echo $pesanan['order_id']; ?>';
-            },
-            onPending: function () {
-                Swal.fire({
-                    icon: 'info',
-                    title: 'Menunggu Pembayaran',
-                    text: 'Selesaikan pembayaran di channel pilihan Anda.',
-                    confirmButtonColor: '#c17f3e',
-                    customClass: { popup: 'swal2-popup' }
-                }).then(() => window.location.reload());
-            },
-            onError: function () {
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Pembayaran Gagal',
-                    text: 'Terjadi kesalahan saat memproses pembayaran.',
-                    confirmButtonColor: '#b91c1c',
-                    customClass: { popup: 'swal2-popup' }
-                });
-            }
-        });
-    };
+    // DIUBAH: Auto-refresh setiap 5 detik jika status masih pending
+    <?php if ($status_class === 'pending'): ?>
+    setTimeout(function () {
+        window.location.reload();
+    }, 5000);
     <?php endif; ?>
 </script>
 </body>

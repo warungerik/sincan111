@@ -2,5 +2,5 @@
 // includes/config_fonnte.php
 
 // --- Ganti Token API Fonnte ---
-$fonnte_token = 'MsRHzeaZGAtm2CXjk8aT'; 
+$fonnte_token = 'v3wDh2g26gpRnzy86KB8'; 
 ?>

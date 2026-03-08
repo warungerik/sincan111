@@ -1,6 +1,7 @@
 <?php
 include 'includes/koneksi.php';
-include 'config_midtrans.php';
+// DIUBAH: ganti config_midtrans.php → config_lapakinaja.php
+include 'config_lapakinaja.php';
 
 $nomor_wa_admin = '6285183129647';
 $halaman_utama = 'index.php';
@@ -10,7 +11,9 @@ $biaya_layanan_persen = 0.007;
 $produk = null;
 $produk_id = null;
 $show_payment_button = false;
-$snapToken = null;
+// DIUBAH: variabel snap tidak dipakai lagi, diganti qris
+$qris_url         = null;
+$qris_expired     = null;
 $total_harga_server = 0;
 $order_id_server = null;
 $produk_lainnya = [];
@@ -93,30 +96,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $total_harga_server = $subtotal_setelah_voucher + $biaya_layanan;
     $order_id_server = 'WARUNGERIK-' . time() . '-' . $produk_id;
 
-    $item_details_midtrans = [['id' => $produk['id'], 'price' => $harga_satuan_final, 'quantity' => $jumlah, 'name' => $produk['nama_produk']]];
-    if ($potongan_voucher > 0) {
-        $item_details_midtrans[] = ['id' => 'VOUCHER', 'price' => -$potongan_voucher, 'quantity' => 1, 'name' => 'Voucher ' . htmlspecialchars($kode_voucher)];
-    }
-    $item_details_midtrans[] = ['id' => 'FEE', 'price' => $biaya_layanan, 'quantity' => 1, 'name' => "Biaya Layanan"];
-
+    // Simpan transaksi ke DB dulu (sama seperti sebelumnya)
     $stmt_transaksi = $koneksi->prepare("INSERT INTO transaksi (order_id, produk_id, harga, status_pembayaran, nama_pelanggan, email_pelanggan, wa_pelanggan, jumlah) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)");
     $stmt_transaksi->bind_param("sidsssi", $order_id_server, $produk_id, $total_harga_server, $nama_pelanggan, $email_pelanggan, $wa_pelanggan, $jumlah);
     $stmt_transaksi->execute();
 
-    $params = [
-        'transaction_details' => ['order_id' => $order_id_server, 'gross_amount' => $total_harga_server],
-        'item_details' => $item_details_midtrans,
-        'customer_details' => ['first_name' => $nama_pelanggan, 'email' => $email_pelanggan, 'phone' => $wa_pelanggan],
-    ];
+    // DIUBAH: Ganti getSnapToken → lapakinaja_create_transaction
+    $result_qris = lapakinaja_create_transaction($total_harga_server, $order_id_server);
 
-    try {
-        $snapToken = \Midtrans\Snap::getSnapToken($params);
-    } catch (Exception $e) {
-        die('Error: Gagal mendapatkan token pembayaran. ' . $e->getMessage());
+    if ($result_qris['code'] !== 200 && $result_qris['code'] !== 201) {
+        die('Error: Gagal membuat transaksi QRIS. ' . ($result_qris['data']['message'] ?? 'Unknown error'));
     }
-    
-    $stmt_update_token = $koneksi->prepare("UPDATE transaksi SET snap_token = ? WHERE order_id = ?");
-    $stmt_update_token->bind_param("ss", $snapToken, $order_id_server);
+
+    $qris_data    = $result_qris['data'];
+    $qris_url     = $qris_data['qris_url'];
+    $qris_expired = $qris_data['expired_at'];
+    // total_amount dari LapakinAja sudah termasuk unique code
+    $total_harga_server = $qris_data['total_amount'];
+
+    // DIUBAH: Simpan qris_url ke kolom snap_token (kolom yang sama, tidak perlu ALTER TABLE)
+    $stmt_update_token = $koneksi->prepare("UPDATE transaksi SET snap_token = ?, harga = ? WHERE order_id = ?");
+    $stmt_update_token->bind_param("sds", $qris_url, $total_harga_server, $order_id_server);
     $stmt_update_token->execute();
 
     $show_payment_button = true;
@@ -945,7 +945,7 @@ if ($produk) {
 
         .btn-guide:hover { border-color: var(--accent-border); color: var(--accent); background: var(--accent-bg); }
 
-        /* Pay Now (step 2) */
+        /* DIUBAH: Pay Now → QRIS layout */
         .pay-now-wrap { text-align: center; }
 
         .pay-now-wrap p {
@@ -972,7 +972,80 @@ if ($produk) {
             font-size: 26px;
             font-weight: 700;
             color: var(--success);
-            margin-bottom: 20px;
+            margin-bottom: 6px;
+        }
+
+        /* BARU: style QRIS */
+        .qris-note {
+            font-size: 11.5px;
+            color: var(--muted2);
+            margin-bottom: 18px;
+        }
+
+        .qris-img-wrap {
+            margin: 0 auto 16px;
+            border: 2px solid var(--border);
+            border-radius: 14px;
+            padding: 14px;
+            display: inline-block;
+            background: white;
+        }
+
+        .qris-img-wrap img {
+            width: 220px;
+            height: 220px;
+            display: block;
+        }
+
+        .qris-timer {
+            font-size: 13px;
+            color: var(--warn);
+            margin-bottom: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .qris-timer.expired { color: var(--danger); }
+
+        .btn-cek-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 13px;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-family: var(--font);
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s;
+            box-shadow: 0 2px 8px rgba(193,127,62,0.3);
+        }
+
+        .btn-cek-status:hover {
+            background: var(--accent-hover);
+            box-shadow: 0 4px 14px rgba(193,127,62,0.4);
+            transform: translateY(-1px);
+        }
+
+        .btn-cek-status:disabled {
+            background: var(--muted2);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .status-msg-box {
+            margin-top: 10px;
+            font-size: 13px;
+            min-height: 20px;
         }
 
         /* ═══════════════════════════════════════════
@@ -1493,8 +1566,6 @@ if ($produk) {
                                         </div>
                                     </div>
                                 </div>
-                                <!-- ═══ END DAFTAR VOUCHER ═══ -->
-
                             </div>
 
                             <!-- Price Breakdown -->
@@ -1532,37 +1603,118 @@ if ($produk) {
                 </div>
 
                 <?php elseif ($show_payment_button): ?>
-                <!-- ── PAY NOW ── -->
+                <!-- ── DIUBAH: PAY NOW → QRIS ── -->
                 <div class="card">
                     <div class="card-header">
-                        <div class="card-header-icon green"><i class="fas fa-money-bill-wave"></i></div>
-                        <h2>Selesaikan Pembayaran</h2>
+                        <div class="card-header-icon green"><i class="fas fa-qrcode"></i></div>
+                        <h2>Scan QRIS untuk Membayar</h2>
                     </div>
                     <div class="card-body pay-now-wrap">
-                        <p>Pesanan berhasil dibuat. Klik tombol di bawah untuk melanjutkan ke pembayaran.</p>
+                        <p>Scan QR Code di bawah menggunakan aplikasi m-banking atau dompet digital Anda.</p>
+
                         <div class="order-id-badge">
                             <i class="fas fa-receipt" style="margin-right:6px;color:var(--muted2)"></i>
                             <?= htmlspecialchars($order_id_server) ?>
                         </div>
+
                         <div class="order-total-display">
                             Rp <?= number_format($total_harga_server, 0, ',', '.') ?>
                         </div>
-                        <button id="pay-button" class="btn-primary">
-                            <i class="fas fa-lock"></i> Bayar Sekarang
+                        <div class="qris-note">
+                            <i class="fas fa-info-circle"></i>
+                            Nominal sudah termasuk kode unik untuk verifikasi otomatis. Bayar sesuai nominal di atas.
+                        </div>
+
+                        <!-- QR Code -->
+                        <div class="qris-img-wrap">
+                            <img src="<?= htmlspecialchars($qris_url) ?>" alt="QRIS Payment">
+                        </div>
+
+                        <!-- Countdown expired -->
+                        <div class="qris-timer" id="qris-timer">
+                            <i class="fas fa-clock"></i>
+                            <span>Berlaku hingga: <strong id="countdown">--:--</strong></span>
+                        </div>
+
+                        <!-- Cek status manual -->
+                        <button class="btn-cek-status" id="cek-status-btn" onclick="cekStatusPembayaran()">
+                            <i class="fas fa-sync-alt" id="cek-icon"></i> Cek Status Pembayaran
                         </button>
-                        <script src="https://app.midtrans.com/snap/snap.js" data-client-key="<?= \Midtrans\Config::$clientKey ?>"></script>
-                        <script>
-                            document.getElementById('pay-button').onclick = function(){
-                                snap.pay('<?= $snapToken ?>', {
-                                    onSuccess: function(result){ window.location.href = 'pesanan.php?order_id=<?= $order_id_server ?>'; },
-                                    onPending: function(result){ window.location.href = 'pesanan.php?order_id=<?= $order_id_server ?>'; },
-                                    onError: function(result){ alert("Pembayaran gagal. Silakan coba lagi."); window.location.href = 'bayar.php?id=<?= $produk_id ?>'; }
-                                });
-                            };
-                            document.getElementById('pay-button').click();
-                        </script>
+                        <div id="status-msg" class="status-msg-box"></div>
+
+                        <a href="index.php" class="btn-secondary" style="margin-top:12px;">
+                            <i class="fas fa-arrow-left"></i> Kembali ke Beranda
+                        </a>
                     </div>
                 </div>
+
+                <script>
+                // — Countdown Timer —
+                (function () {
+                    const expiredAt = new Date('<?= $qris_expired ?>');
+                    const el        = document.getElementById('countdown');
+                    const timerEl   = document.getElementById('qris-timer');
+
+                    const interval = setInterval(() => {
+                        const diff = Math.floor((expiredAt - Date.now()) / 1000);
+                        if (diff <= 0) {
+                            el.textContent = 'Kedaluwarsa';
+                            timerEl.classList.add('expired');
+                            clearInterval(interval);
+                            document.getElementById('cek-status-btn').disabled = true;
+                            document.getElementById('status-msg').innerHTML =
+                                '<span style="color:var(--danger)"><i class="fas fa-times-circle"></i> QR Code sudah kedaluwarsa. Silakan buat pesanan baru.</span>';
+                            return;
+                        }
+                        const m = String(Math.floor(diff / 60)).padStart(2, '0');
+                        const s = String(diff % 60).padStart(2, '0');
+                        el.textContent = m + ':' + s;
+                    }, 1000);
+                })();
+
+                // — Cek Status Pembayaran —
+                function cekStatusPembayaran() {
+                    const btn  = document.getElementById('cek-status-btn');
+                    const icon = document.getElementById('cek-icon');
+                    const msg  = document.getElementById('status-msg');
+                    btn.disabled = true;
+                    icon.className = 'fas fa-spinner fa-spin';
+                    msg.innerHTML = '';
+
+                    fetch('cek_status_qris.php?order_id=<?= urlencode($order_id_server) ?>')
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data.status === 'success') {
+                                window.location.href = 'pesanan.php?order_id=<?= urlencode($order_id_server) ?>';
+                            } else if (data.status === 'expired' || data.status === 'failed') {
+                                msg.innerHTML = '<span style="color:var(--danger)"><i class="fas fa-times-circle"></i> Pembayaran kedaluwarsa atau gagal. Silakan buat pesanan baru.</span>';
+                                btn.disabled = true;
+                            } else {
+                                msg.innerHTML = '<span style="color:var(--warn)"><i class="fas fa-hourglass-half"></i> Menunggu pembayaran...</span>';
+                                btn.disabled = false;
+                                icon.className = 'fas fa-sync-alt';
+                            }
+                        })
+                        .catch(() => {
+                            msg.innerHTML = '<span style="color:var(--danger)"><i class="fas fa-exclamation-circle"></i> Gagal terhubung ke server.</span>';
+                            btn.disabled = false;
+                            icon.className = 'fas fa-sync-alt';
+                        });
+                }
+
+                // Auto cek setiap 5 detik
+                const autoCheck = setInterval(() => {
+                    fetch('cek_status_qris.php?order_id=<?= urlencode($order_id_server) ?>')
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data.status === 'success') {
+                                clearInterval(autoCheck);
+                                window.location.href = 'pesanan.php?order_id=<?= urlencode($order_id_server) ?>';
+                            }
+                        })
+                        .catch(() => {});
+                }, 5000);
+                </script>
                 <?php endif; ?>
             </div>
         </div>
@@ -1667,7 +1819,7 @@ if ($produk) {
             <ol>
                 <li>Pilih <strong>jumlah</strong> produk yang diinginkan.</li>
                 <li>Isi <strong>Nama Lengkap</strong>, <strong>Email</strong>, dan <strong>Nomor WhatsApp</strong>.</li>
-                <li>Klik <strong>"Lanjutkan ke Pembayaran"</strong> dan selesaikan pembayaran.</li>
+                <li>Klik <strong>"Bayar Sekarang"</strong> lalu scan QRIS yang muncul.</li>
                 <li>Produk akan <strong>otomatis dikirim</strong> ke nomor WhatsApp setelah pembayaran berhasil.</li>
             </ol>
         </div>
@@ -1833,7 +1985,6 @@ document.addEventListener('DOMContentLoaded', function () {
                     voucher = { tipe: data.tipe, nilai: data.nilai };
                     voucherInput.readOnly = true;
                     voucherBtn.textContent = 'Oke';
-                    // Tandai voucher yang dipakai di list
                     document.querySelectorAll('.voucher-item').forEach(el => {
                         if (el.dataset.kode === kode) {
                             el.classList.add('used');
